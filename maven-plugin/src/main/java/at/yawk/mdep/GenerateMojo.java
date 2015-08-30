@@ -9,10 +9,7 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import javax.xml.bind.JAXBContext;
@@ -57,6 +54,10 @@ public class GenerateMojo extends AbstractMojo {
     @Parameter(name = "excludes")
     List<String> excludes = Collections.emptyList();
 
+    @Parameter(name = "repositories")
+    @Nullable
+    Set<String> repositories = null;
+
     @Override
     @SneakyThrows({ MalformedURLException.class, NoSuchAlgorithmException.class })
     public void execute() throws MojoExecutionException, MojoFailureException {
@@ -79,7 +80,14 @@ public class GenerateMojo extends AbstractMojo {
 
             if (!matcher.matches(artifact)) { continue; }
 
+            boolean foundInRepository = false;
             for (ArtifactRepository repository : remoteArtifactRepositories) {
+                // only scan configured repositories
+                if (this.repositories != null &&
+                    !this.repositories.contains(repository.getId())) {
+                    continue;
+                }
+
                 URL url = new URL(repository.getUrl() + '/' + repository.pathOf(artifact));
                 try (InputStream input = url.openStream()) {
                     getLog().info("Getting checksum for " + artifact);
@@ -97,12 +105,16 @@ public class GenerateMojo extends AbstractMojo {
                     dependencies.add(dependency);
 
                     // added dependency correctly - don't check the other repos
+                    foundInRepository = true;
                     break;
                 } catch (IOException ignored) {
                     // skip this repo
                 }
             }
-            // todo: log if we couldn't find the dependency
+
+            if (!foundInRepository) {
+                throw new MojoExecutionException("Could not find " + artifact + " in configured repositories");
+            }
         }
 
         getLog().info("Saving dependency xml");
