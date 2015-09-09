@@ -6,9 +6,15 @@ import com.google.common.annotations.VisibleForTesting;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -63,8 +69,28 @@ public class GenerateMojo extends AbstractMojo {
     @Nullable
     Set<String> repositories = null;
 
+    // one week caching by default
+    @Parameter(name = "cacheHours", defaultValue = "168")
+    double cacheHours;
+
+    private Path cacheStore;
+
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
+        if (cacheHours > 0) {
+            cacheStore = Environment.createCacheStore(new Logger() {
+                @Override
+                public void info(String msg) {
+                    getLog().info(msg);
+                }
+
+                @Override
+                public void warn(String msg) {
+                    getLog().warn(msg);
+                }
+            }, "mdep-maven-plugin");
+        }
+
         ArtifactMatcher includesMatcher;
         if (includes == null) {
             includesMatcher = ArtifactMatcher.acceptAll();
@@ -111,7 +137,38 @@ public class GenerateMojo extends AbstractMojo {
         project.addResource(resource);
     }
 
+    @SneakyThrows(NoSuchMethodException.class)
     private Dependency findArtifact(Artifact artifact) throws MojoExecutionException {
+        boolean hasToString = artifact.getClass().getMethod("toString") !=
+                              Object.class.getMethod("toString");
+        String cacheName = hasToString ? artifact.toString() :
+                artifact.getGroupId() + ':' +
+                artifact.getArtifactId() + ':' +
+                artifact.getVersion() + ':';
+        Path cacheFile = cacheStore.resolve(cacheName);
+
+        // check local cache
+        if (cacheHours > 0) {
+            if (Files.exists(cacheFile)) {
+                Instant cacheDeadline = Instant.now().minusSeconds((long) (60 * 60 * cacheHours));
+                try {
+                    if (Files.getLastModifiedTime(cacheFile).toInstant()
+                            .isAfter(cacheDeadline)) {
+
+                        try (InputStream in = Files.newInputStream(cacheFile)) {
+                            Dependency dependency = (Dependency) JAXBContext.newInstance(Dependency.class)
+                                    .createUnmarshaller().unmarshal(in);
+
+                            getLog().info("Checksum was present in local cache: " + artifact);
+                            return dependency;
+                        }
+                    }
+                } catch (IOException | JAXBException e) {
+                    throw new MojoExecutionException("Failed to read local cache", e);
+                }
+            }
+        }
+
         for (ArtifactRepository repository : remoteArtifactRepositories) {
             // only scan configured repositories
             if (this.repositories != null &&
@@ -120,14 +177,25 @@ public class GenerateMojo extends AbstractMojo {
             }
 
             Dependency dependency = findArtifactInRepository(artifact, repository);
-            if (dependency != null) { return dependency; }
+            if (dependency != null) {
+
+                if (cacheHours > 0) {
+                    try (OutputStream out = Files.newOutputStream(cacheFile)) {
+                        JAXBContext.newInstance(Dependency.class)
+                                .createMarshaller().marshal(dependency, out);
+                    } catch (IOException | JAXBException e) {
+                        getLog().warn("Could not save dependency to local cache", e);
+                    }
+                }
+                return dependency;
+            }
         }
 
         throw new MojoExecutionException("Could not find " + artifact + " in configured repositories");
     }
 
     @Nullable
-    @SneakyThrows//({ MalformedURLException.class, NoSuchAlgorithmException.class })
+    @SneakyThrows({ MalformedURLException.class, NoSuchAlgorithmException.class })
     @VisibleForTesting
     Dependency findArtifactInRepository(Artifact artifact, ArtifactRepository repository)
             throws MojoExecutionException {
