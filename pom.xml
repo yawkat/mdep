@@ -21,6 +21,35 @@
         </license>
     </licenses>
 
+    <name>${project.groupId}:${project.artifactId}</name>
+    <description>Maven plugin and library for loading maven dependencies remotely at runtime.</description>
+    <url>https://github.com/yawkat/mdep</url>
+
+    <developers>
+        <developer>
+            <name>Jonas Konrad</name>
+            <url>http://yawk.at</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <url>https://github.com/yawkat/mdep</url>
+        <connection>scm:git:https://github.com/yawkat/mdep.git</connection>
+        <developerConnection>scm:git:git@github.com:yawkat/mdep.git</developerConnection>
+        <tag>HEAD</tag>
+    </scm>
+
+    <distributionManagement>
+        <snapshotRepository>
+            <id>ossrh</id>
+            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+        </snapshotRepository>
+        <repository>
+            <id>ossrh</id>
+            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+        </repository>
+    </distributionManagement>
+
     <properties>
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
@@ -55,4 +84,28 @@
         </dependency>
     </dependencies>
 
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>2.2.1</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>2.9.1</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>1.5</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-release-plugin</artifactId>
+                <version>2.5.3</version>
+            </plugin>
+        </plugins>
+    </build>
 </project>
