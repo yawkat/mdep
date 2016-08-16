@@ -18,6 +18,10 @@ import java.util.List;
  */
 class Environment {
     public static DependencyStore createDependencyStore(Logger logger) {
+        return new FileDependencyStore(createCacheStore(logger, "mdep"));
+    }
+
+    public static Path createCacheStore(Logger logger, String directoryName) {
         List<Path> candidates = new ArrayList<>();
 
         String cacheHome = System.getenv("XDG_CACHE_HOME");
@@ -47,7 +51,7 @@ class Environment {
                 continue;
             }
 
-            Path mdepDirectory = candidate.resolve("mdep");
+            Path mdepDirectory = candidate.resolve(directoryName);
             boolean exists = Files.exists(mdepDirectory);
             if (exists && !Files.isDirectory(mdepDirectory)) {
                 logger.warn("Did not expect regular file at " + mdepDirectory);
@@ -65,7 +69,7 @@ class Environment {
                 continue;
             }
 
-            return new FileDependencyStore(mdepDirectory);
+            return mdepDirectory;
         }
 
         throw new RuntimeException("No suitable dependency storage directory found");
