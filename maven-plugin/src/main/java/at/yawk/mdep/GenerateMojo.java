@@ -17,11 +17,17 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import javax.xml.bind.JAXBContext;
@@ -143,34 +149,45 @@ public class GenerateMojo extends AbstractMojo {
         project.addResource(resource);
     }
 
-    @SneakyThrows(NoSuchMethodException.class)
     private Dependency findArtifact(Artifact artifact) throws MojoExecutionException {
-        boolean hasToString = artifact.getClass().getMethod("toString") !=
-                              Object.class.getMethod("toString");
-        String cacheName = hasToString ? artifact.toString() :
-                artifact.getGroupId() + ':' +
-                artifact.getArtifactId() + ':' +
-                artifact.getVersion() + ':';
-        Path cacheFile = cacheStore.resolve(cacheName);
+        // all are scanned, the first is used to store the dependency
+        List<Path> cacheSearchLocations = new ArrayList<>();
+
+        List<String> coordinateComponents = Arrays.asList(
+                artifact.getGroupId(),
+                artifact.getArtifactId(),
+                artifact.getVersion(),
+                artifact.getScope());
+
+        // in 1.0, we used only ':' as the separator. This does not work on windows, and the following code fixes
+        // that problem.
+
+        for (String separator : Arrays.asList(":", "/")) {
+            try {
+                cacheSearchLocations.add(cacheStore.resolve(String.join(separator, coordinateComponents)));
+            } catch (InvalidPathException ignored) {}
+        }
 
         // check local cache
         if (cacheHours > 0) {
-            if (Files.exists(cacheFile)) {
-                Instant cacheDeadline = Instant.now().minusSeconds((long) (60 * 60 * cacheHours));
-                try {
-                    if (Files.getLastModifiedTime(cacheFile).toInstant()
-                            .isAfter(cacheDeadline)) {
+            for (Path searchLocation : cacheSearchLocations) {
+                if (Files.exists(searchLocation)) {
+                    Instant cacheDeadline = Instant.now().minusSeconds((long) (60 * 60 * cacheHours));
+                    try {
+                        if (Files.getLastModifiedTime(searchLocation).toInstant()
+                                .isAfter(cacheDeadline)) {
 
-                        try (InputStream in = Files.newInputStream(cacheFile)) {
-                            Dependency dependency = (Dependency) JAXBContext.newInstance(Dependency.class)
-                                    .createUnmarshaller().unmarshal(in);
+                            try (InputStream in = Files.newInputStream(searchLocation)) {
+                                Dependency dependency = (Dependency) JAXBContext.newInstance(Dependency.class)
+                                        .createUnmarshaller().unmarshal(in);
 
-                            getLog().info("Checksum was present in local cache: " + artifact);
-                            return dependency;
+                                getLog().info("Checksum was present in local cache: " + artifact);
+                                return dependency;
+                            }
                         }
+                    } catch (IOException | JAXBException e) {
+                        throw new MojoExecutionException("Failed to read local cache", e);
                     }
-                } catch (IOException | JAXBException e) {
-                    throw new MojoExecutionException("Failed to read local cache", e);
                 }
             }
         }
@@ -186,9 +203,15 @@ public class GenerateMojo extends AbstractMojo {
             if (dependency != null) {
 
                 if (cacheHours > 0) {
-                    try (OutputStream out = Files.newOutputStream(cacheFile)) {
-                        JAXBContext.newInstance(Dependency.class)
-                                .createMarshaller().marshal(dependency, out);
+                    try {
+                        Path target = cacheSearchLocations.get(0);
+                        if (!Files.isDirectory(target.getParent())) {
+                            Files.createDirectories(target.getParent());
+                        }
+                        try (OutputStream out = Files.newOutputStream(target)) {
+                            JAXBContext.newInstance(Dependency.class)
+                                    .createMarshaller().marshal(dependency, out);
+                        }
                     } catch (IOException | JAXBException e) {
                         getLog().warn("Could not save dependency to local cache", e);
                     }
