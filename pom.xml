@@ -5,7 +5,7 @@
     <groupId>at.yawk.mdep</groupId>
     <artifactId>mdep-parent</artifactId>
     <packaging>pom</packaging>
-    <version>1.0.1</version>
+    <version>1.0.2-SNAPSHOT</version>
 
     <modules>
         <module>maven-plugin</module>
@@ -34,7 +34,7 @@
         <url>https://github.com/yawkat/mdep</url>
         <connection>scm:git:https://github.com/yawkat/mdep.git</connection>
         <developerConnection>scm:git:git@github.com:yawkat/mdep.git</developerConnection>
-        <tag>mdep-parent-1.0.1</tag>
+        <tag>HEAD</tag>
     </scm>
 
     <distributionManagement>
