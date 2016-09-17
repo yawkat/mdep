@@ -21,6 +21,7 @@ public class AntArtifactMatcher implements ArtifactMatcher {
         this.patterns = Arrays.asList(pattern.split(":"));
     }
 
+    @Override
     public boolean matches(Artifact artifact) {
         List<String> parts = Arrays.asList(
                 artifact.getGroupId(), artifact.getArtifactId(), artifact.getVersion(), artifact.getClassifier());

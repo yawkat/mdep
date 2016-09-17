@@ -40,20 +40,27 @@ import org.apache.maven.artifact.repository.metadata.ArtifactRepositoryMetadata;
 import org.apache.maven.artifact.repository.metadata.Metadata;
 import org.apache.maven.artifact.repository.metadata.Snapshot;
 import org.apache.maven.artifact.repository.metadata.io.xpp3.MetadataXpp3Reader;
+import org.apache.maven.artifact.resolver.filter.ArtifactFilter;
 import org.apache.maven.model.Resource;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
+import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.project.MavenProject;
+import org.apache.maven.shared.dependency.tree.DependencyNode;
+import org.apache.maven.shared.dependency.tree.DependencyTreeBuilder;
+import org.apache.maven.shared.dependency.tree.DependencyTreeBuilderException;
+import org.apache.maven.shared.dependency.tree.traversal.DependencyNodeVisitor;
 import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
 
 /**
  * @author yawkat
  */
+@SuppressWarnings("WeakerAccess")
 @Mojo(name = "generate",
         defaultPhase = LifecyclePhase.GENERATE_RESOURCES,
         requiresDependencyCollection = ResolutionScope.COMPILE)
@@ -61,14 +68,14 @@ public class GenerateMojo extends AbstractMojo {
     @Parameter(defaultValue = "${project}", readonly = true)
     MavenProject project;
 
+    @Parameter(defaultValue = "${localRepository}", readonly = true)
+    ArtifactRepository localRepository;
+
     @Parameter(name = "outputDirectory", defaultValue = "${project.build.directory}/generated-resources/mdep")
     File outputDirectory;
 
     @Parameter(defaultValue = "${project.remoteArtifactRepositories}", readonly = true)
     Collection<ArtifactRepository> remoteArtifactRepositories;
-
-    @Parameter(defaultValue = "${project.artifacts}", readonly = true)
-    Collection<Artifact> dependencyArtifacts;
 
     @Parameter(name = "includes")
     @Nullable
@@ -84,6 +91,8 @@ public class GenerateMojo extends AbstractMojo {
     // one week caching by default
     @Parameter(name = "cacheHours", defaultValue = "168")
     double cacheHours;
+
+    @Component DependencyTreeBuilder dependencyTreeBuilder;
 
     private Path cacheStore;
 
@@ -112,17 +121,37 @@ public class GenerateMojo extends AbstractMojo {
         ArtifactMatcher excludesMatcher = ArtifactMatcher.anyMatch(toAntMatchers(excludes));
         ArtifactMatcher matcher = includesMatcher.and(excludesMatcher.not());
 
+        List<Artifact> artifacts = new ArrayList<>();
+
+        try {
+            ArtifactFilter subtreeFilter = artifact -> artifact.getScope() == null ||
+                                                       artifact.getScope().equals(Artifact.SCOPE_COMPILE) ||
+                                                       artifact.getScope().equals(Artifact.SCOPE_RUNTIME);
+            DependencyNode root = dependencyTreeBuilder.buildDependencyTree(project, localRepository, subtreeFilter);
+            root.accept(new DependencyNodeVisitor() {
+                @Override
+                public boolean visit(DependencyNode node) {
+                    if (node.getArtifact() != null) {
+                        if (!subtreeFilter.include(node.getArtifact())) { return false; }
+                        artifacts.add(node.getArtifact());
+                    }
+                    return true;
+                }
+
+                @Override
+                public boolean endVisit(DependencyNode node) {
+                    return true;
+                }
+            });
+        } catch (DependencyTreeBuilderException e) {
+            throw new MojoExecutionException("Failed to build dependency tree", e);
+        }
+
         List<Dependency> dependencies = new ArrayList<>();
-        for (Artifact artifact : dependencyArtifacts) {
-            // only include compile dependencies
-            // todo: configurable
-            if (!artifact.getScope().equals(Artifact.SCOPE_COMPILE)) { continue; }
-
-            if (!matcher.matches(artifact)) {
-                continue;
+        for (Artifact artifact : artifacts) {
+            if (matcher.matches(artifact)) {
+                dependencies.add(findArtifact(artifact));
             }
-
-            dependencies.add(findArtifact(artifact));
         }
 
         getLog().info("Saving dependency xml");
